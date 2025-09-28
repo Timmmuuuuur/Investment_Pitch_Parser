@@ -1,15 +1,13 @@
 import os
 import fitz  # PyMuPDF
 import pptx
-import requests
-import time
-
 from openai import OpenAI
-from serpapi import GoogleSearch
 
 # Load API keys from environment
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-SERPAPI_API_KEY = os.getenv("SERPAPI_API_KEY")
+
+if not OPENROUTER_API_KEY:
+    raise ValueError("OPENROUTER_API_KEY environment variable is not set. Please export your OpenRouter API key.")
 
 # Set up OpenRouter client
 client = OpenAI(
@@ -35,39 +33,78 @@ def extract_text_from_pptx(path):
                 text += shape.text + "\n"
     return text
 
-# Optional: Use SerpAPI to enrich with company web info
-def web_search_company_info(query, num_results=5):
-    if not SERPAPI_API_KEY:
-        return "No SERPAPI API key provided."
+# Auto-detect file format and extract text
+def extract_text_from_file(file_path):
+    """
+    Automatically detects file format and extracts text accordingly
+    Supports PDF and PPTX formats
+    """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
+    
+    file_extension = file_path.lower().split('.')[-1]
+    
+    if file_extension == 'pdf':
+        print(f"[INFO] Detected PDF format, extracting text...")
+        return extract_text_from_pdf(file_path)
+    elif file_extension in ['pptx', 'ppt']:
+        print(f"[INFO] Detected PowerPoint format, extracting text...")
+        return extract_text_from_pptx(file_path)
+    else:
+        raise ValueError(f"Unsupported file format: {file_extension}. Supported formats: PDF, PPTX")
 
-    params = {
-        "engine": "google",
-        "q": query,
-        "api_key": SERPAPI_API_KEY,
-        "num": num_results
-    }
 
-    search = GoogleSearch(params)
-    results = search.get_dict()
-
-    snippets = []
-    for res in results.get("organic_results", []):
-        snippet = res.get("snippet", "")
-        if snippet:
-            snippets.append(snippet)
-
-    return "\n".join(snippets)
+# Extract company information from pitch deck
+def extract_company_info(extracted_text):
+    print("[INFO] Extracting company information...")
+    
+    EXTRACTION_PROMPT = (
+        "You are an AI assistant that extracts key company information from pitch decks. "
+        "Analyze the following pitch deck text and extract ONLY the company name and website URL. "
+        "Return your response in this exact JSON format: "
+        '{"company_name": "Company Name", "website": "https://website.com"} '
+        "If website is not found, use null. Be precise and only extract what's clearly stated."
+    )
+    
+    response = client.chat.completions.create(
+        model="openai/gpt-4",
+        messages=[
+            {"role": "system", "content": EXTRACTION_PROMPT},
+            {"role": "user", "content": extracted_text}
+        ],
+        temperature=0.1
+    )
+    
+    try:
+        import json
+        result = json.loads(response.choices[0].message.content.strip())
+        return result.get("company_name"), result.get("website")
+    except:
+        # Fallback if JSON parsing fails
+        content = response.choices[0].message.content
+        return None, None
 
 # Use OpenRouter (ChatGPT or Claude) to generate a markdown summary
 def summarize_with_ai(extracted_text, extra_context=""):
     print("[INFO] Sending data to OpenRouter for summarization...")
 
     SYSTEM_PROMPT = (
-        "You are an analyst assistant for an early-stage VC investor. "
-        "Given a pitch deck (text), generate a structured summary of the company "
-        "as if preparing for an investment committee. Be concise but informative. "
-        "Include: company name, website, founding team, product, traction, business model, market size, competitors, and risks. "
-        "You can also include any helpful information from web search if available."
+        "You are an expert investment analyst for an early-stage VC fund. "
+        "Analyze this pitch deck and create a comprehensive investment memo. "
+        "Structure your analysis to include:\n"
+        "- Company Overview & Mission\n"
+        "- Product/Service Description\n"
+        "- Market Opportunity & Size\n"
+        "- Business Model & Revenue Streams\n"
+        "- Traction & Key Metrics\n"
+        "- Founding Team & Key Personnel\n"
+        "- Competitive Landscape\n"
+        "- Financial Projections (if available)\n"
+        "- Investment Ask & Use of Funds\n"
+        "- Key Risks & Concerns\n"
+        "- Investment Recommendation\n\n"
+        "Be analytical, concise, and focus on metrics that matter to investors. "
+        "Highlight any red flags or areas requiring due diligence."
     )
 
     full_input = extracted_text + "\n\n" + extra_context
@@ -77,7 +114,8 @@ def summarize_with_ai(extracted_text, extra_context=""):
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": full_input}
-        ]
+        ],
+        temperature=0.3
     )
 
     return response.choices[0].message.content
