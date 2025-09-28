@@ -1,3 +1,23 @@
-openai
-PyMuPDF
-markdownify
+# Core AI and LLM API integration
+openai>=1.3.7      # Official OpenAI client supporting v1 API format
+httpx>=0.25.0      # Used by OpenAI's new client
+
+# PDF + PPT parsing
+PyMuPDF>=1.23.5     # For extracting text from PDFs
+python-pptx>=0.6.21 # For reading PPTX files
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Markdown output (optional, but clean formatting)
+markdownify>=0.11.6
+
+# Web scraping (for brand enrichment)
+beautifulsoup4>=4.12.2
+requests>=2.31.0
+
+# Optional: For SerpAPI (Google/Bing search API), if you’re using it
+google-search-results>=2.4.2
+
+# Optional: Faster JSON parsing (used in some LLM workflows)
+orjson>=3.9.10
